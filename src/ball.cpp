@@ -100,7 +100,7 @@ void ball::pop()
         .explode(body->GetPosition(), body->GetWorld());
 
     is_alive = false;
-    respawn_counter = config.BOOSTER_RESPAWN_TIME;
+    respawn_counter = config.BALL_RESPAWN_TIME;
 
     reset_flags();
     player_ptr->stats.popped++;
@@ -216,4 +216,27 @@ void ball::score()
     player_ptr->g->score(this);
     player_ptr->stats.flag_captures += flags.size();
     reset_flags();
+}
+
+
+void ball::take_flags(ball* o, const flag_type type)
+{
+    for(auto && o : o->flags) {
+        if(o.f->type == type) {
+            add_flag(o.f);
+        }
+    }
+
+    // todo we need to add flag drops for these to o player
+    // probably need a refactor
+    o->flags.erase(
+        std::remove_if(
+            o->flags.begin(),
+            o->flags.end(),
+            [type](const ball_flag f) {
+                return f.f->type == type;
+            }
+        ),
+        o->flags.end()
+    );
 }

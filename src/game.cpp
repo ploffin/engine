@@ -353,13 +353,18 @@ bool game::load_map(const std::string map_src)
         delete world;
     }
 
-    world = new b2World(b2Vec2(0, 0));
+    world = new b2World(b2Vec2(0, m->gravity));
 
     // todo: does this need to be thread_local
     thread_local static contact_listener contact_listener_instance;
     world->SetContactListener(&contact_listener_instance);
 
     for(auto && o : m->spikes) {
+        o->add_to_world(world);
+        o->game.set_game(this);
+    }
+
+    for(auto && o : m->gravwells) {
         o->add_to_world(world);
         o->game.set_game(this);
     }
@@ -490,19 +495,20 @@ void game::step()
 
         // check if we can score yet
         if(! o->flags.empty() && o->on_tile_endzone_counter > 0) {
-            flag* score_flag = nullptr;
-
             for(auto && f : m->flags) {
-                if(! f->is_alive && f->type == inv_corresponding_color<flag_type>(o->type)) {
-                    score_flag = f.get();
+                if(! f->is_alive && (
+                    (f->type == inv_corresponding_color<flag_type>(o->type)) ||
+                    (f->type == flag_type::neutral)
+                )) {
+                    o->score();
                     break;
                 }
             }
-
-            if(score_flag) {
-                o->score();
-            }
         }
+    }
+
+    for(auto && o : m->gravwells) {
+        o->suck(world);
     }
 
     for(auto && o : m->bombs) {
@@ -561,7 +567,7 @@ void game::respawn_ball(ball* b)
 
     for(auto && s : m->spawns) {
         if(same_color(s->type, b->type)) {
-            for(std::size_t i=0; i<(s->weight > 0) ? s->weight : 1; ++i) {
+            for(std::size_t i=0; i<((s->weight > 0) ? s->weight : 1); ++i) {
                 potential_spawns.emplace_back(*s);
             }
         }

@@ -5,9 +5,11 @@
 // the types of tiles from tagpro .png map
 enum class tp_tile_type
 {
-    background, tile,
+    background,
+    tile,
     speed_red,
     speed_blue,
+    speed_yellow,
     endzone_red,
     endzone_blue,
     wall,
@@ -30,6 +32,7 @@ enum class tp_tile_type
     respawn_red,
     respawn_blue,
     gravitywell,
+    marsball,
 };
 
 
@@ -41,15 +44,19 @@ struct tp_pos
     std::uint32_t y;
     tp_pos(const std::uint32_t x, const std::uint32_t y): x(x), y(y){}
 
+    bool operator <(const tp_pos& rhs) const
+    {
+        // todo this will fail for maps over 100000 in size
+        // hopefully that never happens lol
+        return ((y*100000) + x) < ((rhs.y * 100000) + rhs.x);
+    }
 };
 
 struct tp_pos_cmp
 {
     bool operator()(const tp_pos& lhs, const tp_pos&rhs) const
     {
-        // todo this will fail for maps over 100000 in size
-        // hopefully that never happens lol
-        return ((lhs.y*100000) + lhs.x) < ((rhs.y * 100000) + rhs.x);
+        return lhs < rhs;
     }
 };
 
@@ -126,8 +133,14 @@ int tp_map_importer::tp_import_json(const std::string & src)
 
     std::map<std::string, map_type> maptype_map = {
         {"normal",          map_type::normal},
-        {"none-gravityCTF", map_type::none_gravityCTF}
+        {"none-gravityCTF", map_type::none_gravityCTF},
+        {"gravity",         map_type::gravity},
+        {"gravityCTF",      map_type::gravityCTF},
     };
+    if(j.find("info") == j.end()) {
+        std::cerr << "error: 'info' not found" << std::endl;
+        return 1;
+    }
     const auto j_info = j.at("info");
     std::string j_maptype;
     if(j_info.find("gameMode") == j_info.end()) {
@@ -142,17 +155,44 @@ int tp_map_importer::tp_import_json(const std::string & src)
     }
 
     m.type    = maptype_map[j_maptype];
-    m.name    = j_info.at("name");
-    m.author  = j_info.at("author");
+    if(j_info.find("name") == j_info.end()) {
+        m.name = "unknown name";
+    } else {
+        m.name = j_info.at("name");
+    }
+
+    if(j_info.find("author") == j_info.end()) {
+        m.author = "unknown-author";
+    } else {
+        m.author = j_info.at("author");
+    }
     m.version = 1;
+    switch(m.type) {
+    case map_type::none_gravityCTF:
+    case map_type::gravity:
+    case map_type::gravityCTF:
+        m.gravity = 9.8; // todo is this correct value?
+        m.jumping_enabled = true;
+        break;
+    default:
+        m.gravity = 0.0;
+        m.jumping_enabled = false;
+        break;
+    }
 
     if(j.find("switches") != j.end()) {
         auto j_toggle = j.at("switches");
         for (json::iterator it = j_toggle.begin(); it != j_toggle.end(); ++it) {
+            if(it.key() == "timer") {
+                continue;
+            }
+
             std::vector<std::string> pieces = split_on(it.key(), ',');
+            if(pieces.size() != 2) {
+                continue;
+            }
             const std::uint32_t x = std::stoi(pieces.at(0));
             const std::uint32_t y = std::stoi(pieces.at(1));
-
             
             const std::uint32_t timer = (it.value().find("timer") != it.value().end())
                 ? it.value()["timer"].get<int>()
@@ -175,10 +215,16 @@ int tp_map_importer::tp_import_json(const std::string & src)
 
     if(j.find("portals") != j.end()) {
         auto j_portals = j.at("portals");
+
+        std::map<tp_pos, portal> destination_portals;
+
         for (json::iterator it = j_portals.begin(); it != j_portals.end(); ++it) {
             const auto j_port = it.value();
 
             std::vector<std::string> pieces = split_on(it.key(), ',');
+            if(pieces.size() != 2) {
+                continue;
+            }
             const std::uint32_t x = std::stoi(pieces.at(0));
             const std::uint32_t y = std::stoi(pieces.at(1));
 
@@ -189,8 +235,12 @@ int tp_map_importer::tp_import_json(const std::string & src)
             }
 
             if(j_port.find("destination") != j_port.end()) {
-
-                p.has_destination = true;
+                auto j_dest = j_port.at("destination");
+                if(j_dest.find("x") != j_dest.end() && j_dest.find("y") != j_dest.end()) {
+                    p.has_destination = true;
+                    const tp_pos dpos(j_dest.at("x"), j_dest.at("y"));
+                    destination_portals[dpos] = p;
+                }
             }
 
             m.portals.emplace_back(new portal(p));
@@ -201,17 +251,36 @@ int tp_map_importer::tp_import_json(const std::string & src)
             tp_import_portal_positions[tp_pos(x, y)] = m.portals.size() - 1;
         }
 
+        // add portals from destination_portals list which only exist as destinations
+        for(auto iter=destination_portals.begin(); iter != destination_portals.end(); ++iter) {
+            const tp_pos dpos = (*iter).first;
+
+            if(tp_import_portal_positions.find(dpos) == tp_import_portal_positions.end()) {
+                m.portals.emplace_back(new portal(dpos.x, dpos.y));
+                tp_import_portal_positions[dpos] = m.portals.size() - 1;
+            }
+        }
+
         // we loop through again to finish adding the destinations as ids
         std::size_t id = 0;
         for (json::iterator it = j_portals.begin(); it != j_portals.end(); ++it, ++id) {
             const auto j_port = it.value();
+            if(id >= m.portals.size()) {
+                std::cerr << "portal id generation error" << std::endl;
+                return 1;
+            }
             portal* p = m.portals.at(id).get();
 
             if(p->has_destination) {
                 auto j_dest = j_port.at("destination");
                 const tp_pos dpos(j_dest.at("x"), j_dest.at("y"));
-                const std::size_t destination_id = tp_import_portal_positions.at(dpos);
 
+                if(tp_import_portal_positions.find(dpos) == tp_import_portal_positions.end()) {
+                    spdlog::get("game")->info("tp_import_portal_position at {0:d},{0:d} not found", dpos.x, dpos.y);
+                    p->has_destination = false;
+                    continue;
+                }
+                const std::size_t destination_id = tp_import_portal_positions.at(dpos);
                 p->destination_id = destination_id;
             }
         }
@@ -221,6 +290,9 @@ int tp_map_importer::tp_import_json(const std::string & src)
         auto j_fields = j.at("fields");
         for (json::iterator it = j_fields.begin(); it != j_fields.end(); ++it) {
             std::vector<std::string> pieces = split_on(it.key(), ',');
+            if(pieces.size() != 2) {
+                continue;
+            }
             const std::uint32_t x = std::stoi(pieces.at(0));
             const std::uint32_t y = std::stoi(pieces.at(1));
 
@@ -247,8 +319,8 @@ int tp_map_importer::tp_import_json(const std::string & src)
     }
 
     if(j.find("spawnPoints") != j.end()) {
+        const auto j_spawnpoints = j.at("spawnPoints");
         auto load_spawnpoints = [&](const spawn_type type) {
-            const auto j_spawnpoints = j.at("spawnPoints");
             auto j_spawns = (type == spawn_type::blue)
                 ? j_spawnpoints.at("blue")
                 : j_spawnpoints.at("red");
@@ -256,15 +328,23 @@ int tp_map_importer::tp_import_json(const std::string & src)
             for (json::iterator it = j_spawns.begin(); it != j_spawns.end(); ++it) {
                 const std::uint32_t x      = it.value()["x"];
                 const std::uint32_t y      = it.value()["y"];
-                const std::uint32_t radius = it.value()["radius"];
-                const std::uint32_t weight = it.value()["weight"];
+                const std::uint32_t radius = (it.value().find("radius") != it.value().end())
+                    ? static_cast<float>(it.value()["radius"])
+                    : 1.0;
+                const std::uint32_t weight = (it.value().find("weight") != it.value().end())
+                    ? static_cast<std::uint32_t>(it.value()["weight"])
+                    : 1;
 
                 m.spawns.emplace_back(new spawn(x, y, radius, weight, type));
             }
         };
 
-        load_spawnpoints(spawn_type::red);
-        load_spawnpoints(spawn_type::blue);
+        if(j_spawnpoints.find("red") != j_spawnpoints.end()) {
+            load_spawnpoints(spawn_type::red);
+        }
+        if(j_spawnpoints.find("blue") != j_spawnpoints.end()) {
+            load_spawnpoints(spawn_type::blue);
+        }
     }
 
     return 0;
@@ -294,6 +374,7 @@ int tp_map_importer::tp_import_png(const std::string & src)
         {"d4d4d4", tp_tile_type::tile},
         {"dcbaba", tp_tile_type::speed_red},
         {"bbb8dd", tp_tile_type::speed_blue},
+        {"dcdcba", tp_tile_type::speed_yellow},
         {"b90000", tp_tile_type::endzone_red},
         {"190094", tp_tile_type::endzone_blue},
         {"787878", tp_tile_type::wall},
@@ -316,6 +397,7 @@ int tp_map_importer::tp_import_png(const std::string & src)
         {"9b0000", tp_tile_type::respawn_red},
         {"00009b", tp_tile_type::respawn_blue},
         {"202020", tp_tile_type::gravitywell},
+        {"ff7373", tp_tile_type::marsball},
     };
 
     for(std::size_t i=0; i<pixels.size() / 4; ++i) {
@@ -362,6 +444,10 @@ int tp_map_importer::tp_import_png(const std::string & src)
         } else if(tiletype == tp_tile_type::speed_blue) {
             for(auto p : make_square_poly(x, y)) {
                 m.tiles.emplace_back(new tile(p, col, tile_type::speed_blue));
+            }
+        } else if(tiletype == tp_tile_type::speed_yellow) {
+            for(auto p : make_square_poly(x, y)) {
+                m.tiles.emplace_back(new tile(p, col, tile_type::speed_yellow));
             }
         } else if(tiletype == tp_tile_type::endzone_red) {
             for(auto p : make_square_poly(x, y)) {
@@ -489,9 +575,11 @@ int tp_map_importer::tp_import_png(const std::string & src)
                                               config.COLOR_TILE,
                                               tile_type::normal));
             }
-            // todo
-            // these currently skipped
-            std::cout << "--gravity well skipped--";
+
+            m.gravwells.emplace_back(new gravwell(x, y, 6.5, 24.0)); // todo -- set correct force
+        } else if(tiletype == tp_tile_type::marsball) {
+            std::cerr << "error: marsball not supported" << std::endl;
+            return 1;
         } else {
             std::cerr << "error: unhandled tile_type: " << tile_color << std::endl;
             return 1;
