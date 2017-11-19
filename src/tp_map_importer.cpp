@@ -608,7 +608,7 @@ int tp_map_importer::tp_import_png(const std::string & src)
         std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_begin)
     };
 
-    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(p2c_time).count() << std::endl;
+    std::cout << std::endl << std::chrono::duration_cast<std::chrono::milliseconds>(p2c_time).count() << std::endl;
 
     return 0;
 }
