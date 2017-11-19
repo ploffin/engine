@@ -1,4 +1,5 @@
 #include <stack>
+#include <boost/functional/hash.hpp>
 #include "util.hpp"
 
 float map_val(
@@ -72,13 +73,14 @@ std::vector<std::unique_ptr<chain>> poly2chain(
 
     auto poly_hash = [&sort_poly](const polygon& poly) {
         auto sorted = sort_poly(poly);
-        std::string s = std::to_string(sorted[0].first)
-                      + std::to_string(sorted[0].second)
-                      + std::to_string(sorted[1].first)
-                      + std::to_string(sorted[1].second)
-                      + std::to_string(sorted[2].first)
-                      + std::to_string(sorted[2].second);
-        return std::hash<std::string>()(s);
+        std::size_t seed = 0;
+        boost::hash_combine(seed, sorted[0].first);
+        boost::hash_combine(seed, sorted[0].second);
+        boost::hash_combine(seed, sorted[1].first);
+        boost::hash_combine(seed, sorted[1].second);
+        boost::hash_combine(seed, sorted[2].first);
+        boost::hash_combine(seed, sorted[3].second);
+        return seed;
     };
 
     auto poly_equal = [&sort_poly](const polygon& A, const polygon& B) {
@@ -94,11 +96,12 @@ std::vector<std::unique_ptr<chain>> poly2chain(
     };
 
     auto edge_hash = [](const edge& e) {
-        std::string s = std::to_string(e.first.first)
-                      + std::to_string(e.first.second)
-                      + std::to_string(e.second.first)
-                      + std::to_string(e.second.second);
-        return std::hash<std::string>()(s);
+        std::size_t seed = 0;
+        boost::hash_combine(seed, e.first.first);
+        boost::hash_combine(seed, e.first.second);
+        boost::hash_combine(seed, e.second.first);
+        boost::hash_combine(seed, e.second.second);
+        return seed;
     };
 
     auto edge_lt = [](const edge& A, const edge& B) {
@@ -114,9 +117,10 @@ std::vector<std::unique_ptr<chain>> poly2chain(
     };
 
     auto point_hash = [](const std::pair<float,float>& A) {
-        std::string s = std::to_string(A.first)
-                      + std::to_string(A.second);
-        return std::hash<std::string>()(s);
+        std::size_t seed = 0;
+        boost::hash_combine(seed, A.first);
+        boost::hash_combine(seed, A.second);
+        return seed;
     };
 
     // ======= actual algorithm begins here =======

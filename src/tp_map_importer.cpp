@@ -589,11 +589,26 @@ int tp_map_importer::tp_import_png(const std::string & src)
     /* could do this as polys are added but keeping
      * it isolated for now
      */
+
     std::vector<polygon> poly_set;
     for(const auto& w : m.walls) {
         poly_set.push_back(w->poly);
     }
+    const std::chrono::high_resolution_clock::time_point t_begin {
+        std::chrono::high_resolution_clock::now()
+    };
+
     m.chains = poly2chain(poly_set);
+
+    const std::chrono::high_resolution_clock::time_point t_end {
+        std::chrono::high_resolution_clock::now()
+    };
+
+    const auto p2c_time {
+        std::chrono::duration_cast<std::chrono::microseconds>(t_end - t_begin)
+    };
+
+    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(p2c_time).count() << std::endl;
 
     return 0;
 }
