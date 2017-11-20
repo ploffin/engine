@@ -594,12 +594,15 @@ int tp_map_importer::tp_import_png(const std::string & src)
     for(const auto& w : m.walls) {
         poly_set.push_back(w->poly);
     }
+    /*
     const std::chrono::high_resolution_clock::time_point t_begin {
         std::chrono::high_resolution_clock::now()
     };
+    */
 
     m.chains = poly2chain(poly_set);
 
+    /*
     const std::chrono::high_resolution_clock::time_point t_end {
         std::chrono::high_resolution_clock::now()
     };
@@ -609,6 +612,7 @@ int tp_map_importer::tp_import_png(const std::string & src)
     };
 
     std::cout << std::endl << std::chrono::duration_cast<std::chrono::milliseconds>(p2c_time).count() << std::endl;
+    */
 
     return 0;
 }
